@@ -17,3 +17,4 @@
 - release and releaseChannel end held notes on request
 - All Sound Off, All Notes Off and the mode messages that imply it release the held notes of their channel and pass through
 - README and index.jsonc describe the cap and the release paths
+- Upgrade the DNA and add the blog post
