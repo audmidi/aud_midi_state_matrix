@@ -36,10 +36,11 @@ packages:
   aud_midi_standard:
     dependency: "direct main"
     description:
-      path: "../aud_midi_standard"
-      relative: true
-    source: path
-    version: "0.1.1"
+      name: aud_midi_standard
+      sha256: dbf2b27336731c528d9d2f70deaf70d2463718914a5ede6d2aab85d24cddd7b0
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.0"
   boolean_selector:
     dependency: transitive
     description:
