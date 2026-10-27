@@ -1,0 +1,28 @@
+// @license
+// Copyright (c) Audanika
+//
+// Use of this source code is governed by terms that can be
+// found in the LICENSE file in the root of this package.
+
+{
+  // The package name, as declared in pubspec.yaml / package.json.
+  "name": "aud_midi_state_matrix",
+
+  // 1-2 sentence summary about this repo.
+  "summary": "Matrices of the state a MIDI stream leaves behind: MidiNoteMatrix counts the Note Ons that hold every note per channel in velocity slots and releases the note towards midiOut with the last Note Off, retrigger per channel; MidiControllerMatrix keeps the last value of every controller per channel.",
+
+  // 1-3 bullet points: the problem space.
+  "domain": [
+    "Sounding notes: 16 x 128 cells of velocity slots (at most 10 per cell), active list, retrigger per channel, midiIn/midiOut chain, release hooks and channel mode release (CC 120, 123-127)",
+    "Controller values: 16 x 128 last values, pass-through chain, no channel mode or 14-bit semantics"
+  ],
+
+  // The repos this one depends on and the repos depending on it.
+  // Keep the reason or the API behind each entry, not just the name.
+  "interfaces": {
+    "uses": {
+      "aud_midi_standard": "MidiMessage, MidiNoteOn, MidiNoteOff, MidiControlChange, MidiKey, MidiMessageCallback"
+    },
+    "usedBy": {}
+  }
+}
