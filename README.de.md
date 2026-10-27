@@ -21,17 +21,19 @@ Teil der aud_midi-Familie, siehe [aud_midi](https://github.com/audmidi/aud_midi)
 ## Stand
 
 - `MidiNoteMatrix`: 16 Kanäle × 128 Noten, Velocity-Slots pro Zelle
-  (anfangs 5, bei Bedarf verdoppelt), `midiIn` und `midiOut`,
+  (anfangs 5, bei Bedarf verdoppelt, höchstens 10), `midiIn` und `midiOut`,
   `retriggerRepeatedNoteOns` pro Kanal, `activeNotes` als Liste von
-  `MidiKey`, `reset`, `releaseAll`
+  `MidiKey`, `release`, `releaseChannel`, `releaseAll`, `reset`
+- All Sound Off, All Notes Off und die Mode-Nachrichten, die es
+  einschließen (CC 120, 123 bis 127), lassen die gehaltenen Noten ihres
+  Kanals los
 - `MidiControllerMatrix`: 16 Kanäle × 128 Controller, der letzte Wert pro
   Zelle, `midiIn` und `midiOut` als Durchleitung, `value`, `set`,
   `entries` als Liste von `MidiControlChange`, `reset`, `resetChannel`
 - `midiOut` ist ein `MidiMessageCallback`; `MidiKey`, `MidiControlChange`
   und der Callback-Typ kommen aus `aud_midi_standard`
-- Noch nicht: Channel-Mode-Nachrichten (All Notes Off, All Sound Off,
-  Reset All Controllers), 14-Bit-Controller-Paare, RPN/NRPN,
-  MIDI-2.0-Nachrichten
+- Noch nicht: Reset All Controllers (CC 121) in der Controller-Matrix,
+  14-Bit-Controller-Paare, RPN/NRPN, MIDI-2.0-Nachrichten
 - 100 % Testabdeckung
 
 ## Installation
@@ -101,9 +103,20 @@ die Zahl belegter Slots vor der Nachricht:
 | NoteOff | n = 0 | unverändert weiterreichen, kein Hänger | wie links |
 
 Ein NoteOn mit Velocity 0 gilt als NoteOff. Alle anderen Nachrichten
-laufen unverändert und in Reihenfolge durch. Die `MidiControllerMatrix`
-merkt sich jeden Control Change und reicht alle Nachrichten weiter, so
-dass beide Matrizen verkettet werden können.
+laufen unverändert und in Reihenfolge durch. Eine Zelle zählt höchstens
+`maxSlots` NoteOns (Standard 10): ein weiteres NoteOn wird nach den Regeln
+oben gesendet, ersetzt aber nur die Velocity des zuletzt belegten Slots,
+so dass ein Strom von NoteOns ohne NoteOffs die Matrix nicht wachsen
+lässt.
+
+Ein NoteOff, das nie ankommt, ließe eine Note endlos klingen. Drei Dinge
+beenden solche Noten: All Sound Off, All Notes Off und die
+Mode-Nachrichten, die es einschließen (CC 120, 123 bis 127), senden für
+jede gehaltene Note ihres Kanals ein NoteOff, bevor sie durchlaufen;
+`release`, `releaseChannel` und `releaseAll` tun dasselbe auf Zuruf, etwa
+wenn ein Port verschwindet oder die App den Fokus verliert. Die
+`MidiControllerMatrix` merkt sich jeden Control Change und reicht alle
+Nachrichten weiter, so dass beide Matrizen verkettet werden können.
 
 ## Mitwirken
 

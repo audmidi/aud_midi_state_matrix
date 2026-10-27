@@ -13,7 +13,7 @@
 
   // 1-3 bullet points: the problem space.
   "domain": [
-    "Sounding notes: 16 x 128 cells of velocity slots, active list, retrigger per channel, midiIn/midiOut chain",
+    "Sounding notes: 16 x 128 cells of velocity slots (at most 10 per cell), active list, retrigger per channel, midiIn/midiOut chain, release hooks and channel mode release (CC 120, 123-127)",
     "Controller values: 16 x 128 last values, pass-through chain, no channel mode or 14-bit semantics"
   ],
 

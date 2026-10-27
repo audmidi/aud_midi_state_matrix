@@ -21,16 +21,18 @@ Part of the aud_midi family, see [aud_midi](https://github.com/audmidi/aud_midi)
 ## State
 
 - `MidiNoteMatrix`: 16 channels × 128 notes, velocity slots per cell
-  (initially 5, doubled when full), `midiIn` and `midiOut`,
+  (initially 5, doubled when full, at most 10), `midiIn` and `midiOut`,
   `retriggerRepeatedNoteOns` per channel, `activeNotes` as a list of
-  `MidiKey`, `reset`, `releaseAll`
+  `MidiKey`, `release`, `releaseChannel`, `releaseAll`, `reset`
+- All Sound Off, All Notes Off and the mode messages that imply it
+  (CC 120, 123 to 127) release the held notes of their channel
 - `MidiControllerMatrix`: 16 channels × 128 controllers, the last value
   per cell, `midiIn` and `midiOut` pass-through, `value`, `set`,
   `entries` as a list of `MidiControlChange`, `reset`, `resetChannel`
 - `midiOut` is a `MidiMessageCallback`; `MidiKey`, `MidiControlChange`
   and the callback type come from `aud_midi_standard`
-- Not yet: channel mode messages (All Notes Off, All Sound Off, Reset
-  All Controllers), 14-bit controller pairs, RPN/NRPN, MIDI 2.0 messages
+- Not yet: Reset All Controllers (CC 121) in the controller matrix,
+  14-bit controller pairs, RPN/NRPN, MIDI 2.0 messages
 - 100 % test coverage
 
 ## Installation
@@ -100,8 +102,18 @@ the message:
 | Note Off | n = 0 | forward unchanged, so no note gets stuck | same |
 
 A Note On with velocity 0 counts as Note Off. Every other message passes
-through unchanged and in order. `MidiControllerMatrix` records every
-Control Change and passes all messages through, so both matrices chain.
+through unchanged and in order. A cell counts at most `maxSlots` Note Ons
+(default 10): a further Note On is sent by the rules above, but only
+replaces the velocity of the slot filled last, so a stream of Note Ons
+without Note Offs cannot grow the matrix.
+
+A Note Off that never arrives would leave a note sounding forever. Three
+things end such notes: All Sound Off, All Notes Off and the mode messages
+that imply it (CC 120, 123 to 127) send a Note Off for every held note of
+their channel before they pass through; `release`, `releaseChannel` and
+`releaseAll` do the same on request, e.g. when a port disappears or the
+app loses focus. `MidiControllerMatrix` records every Control Change and
+passes all messages through, so both matrices chain.
 
 ## Contributing
 

@@ -5,6 +5,7 @@
 // found in the LICENSE file in the root of this package.
 
 import 'dart:collection';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:aud_midi_standard/aud_midi_standard.dart';
@@ -18,7 +19,9 @@ import 'package:aud_midi_standard/aud_midi_standard.dart';
 /// Off frees the slot filled last, so the occupied slots are contiguous
 /// from the front and their number says how many Note Ons hold the note.
 /// A cell starts with [initialSlots] slots and doubles them when all are
-/// taken.
+/// taken, up to [maxSlots]. A full cell counts no further Note On: the
+/// newest velocity replaces the slot filled last, so a stream of Note Ons
+/// without Note Offs cannot grow the matrix.
 ///
 /// Messages enter through [midiIn] and leave through [midiOut]:
 ///
@@ -31,8 +34,16 @@ import 'package:aud_midi_standard/aud_midi_standard.dart';
 /// - a Note Off of a note that is not held is forwarded unchanged, so no
 ///   note gets stuck behind the matrix;
 /// - a Note On with velocity 0 counts as Note Off;
+/// - All Sound Off (CC 120), All Notes Off (CC 123) and the mode messages
+///   that imply All Notes Off (CC 124 to 127) send a Note Off for every
+///   held note of their channel, free its cells and pass through after
+///   the Note Offs;
 /// - every other message passes through unchanged and in order, so the
 ///   matrix can sit in a chain in front of an output.
+///
+/// [release], [releaseChannel] and [releaseAll] let the app end notes
+/// whose Note Off will never arrive, e.g. when a port disappears or the
+/// app loses focus.
 ///
 /// Channels and notes are 0-based. Arguments outside their ranges fail an
 /// assertion in debug builds.
@@ -43,8 +54,11 @@ final class MidiNoteMatrix {
   ///   later.
   /// - [initialSlots] the number of velocity slots every cell starts
   ///   with, at least 1.
-  MidiNoteMatrix({this.midiOut, this.initialSlots = 5})
+  /// - [maxSlots] the number of Note Ons a cell counts at most, at least
+  ///   [initialSlots].
+  MidiNoteMatrix({this.midiOut, this.initialSlots = 5, this.maxSlots = 10})
     : assert(initialSlots >= 1),
+      assert(maxSlots >= initialSlots),
       _slots = List.generate(
         channels * notes,
         (_) => Uint8List(initialSlots),
@@ -57,9 +71,10 @@ final class MidiNoteMatrix {
   /// Processes [messages] in order and hands the messages that result to
   /// [midiOut] in one call.
   ///
-  /// Note On and Note Off messages update the matrix and are sent by the
-  /// rules of this class; every other message passes through unchanged.
-  /// [midiOut] is not called when no message results.
+  /// Note On, Note Off and the channel mode messages that end notes
+  /// update the matrix and are sent by the rules of this class; every
+  /// other message passes through unchanged. [midiOut] is not called when
+  /// no message results.
   void midiIn(List<MidiMessage> messages) {
     final out = <MidiMessage>[];
     for (final message in messages) {
@@ -70,6 +85,9 @@ final class MidiNoteMatrix {
           _noteOn(noteOn, out);
         case final MidiNoteOff noteOff:
           _noteOff(noteOff, noteOff.channel, noteOff.note, out);
+        case final MidiControlChange change when _endsNotes(change):
+          _releaseChannel(change.channel, out);
+          out.add(change);
         default:
           out.add(message);
       }
@@ -78,13 +96,29 @@ final class MidiNoteMatrix {
   }
 
   // ...........................................................................
-  /// Sends a Note Off for every active note and empties the matrix.
+  /// Sends a Note Off for [note] on [channel] when the note is held and
+  /// frees its cell; sends nothing otherwise.
+  void release({required int channel, required int note}) {
+    final out = <MidiMessage>[];
+    _release(_cell(channel, note), out);
+    _send(out);
+  }
+
+  /// Sends a Note Off for every held note of [channel] and frees its
+  /// cells.
+  void releaseChannel(int channel) {
+    assert(channel >= 0 && channel < channels);
+    final out = <MidiMessage>[];
+    _releaseChannel(channel, out);
+    _send(out);
+  }
+
+  /// Sends a Note Off for every held note and empties the matrix.
   void releaseAll() {
-    final out = <MidiMessage>[
-      for (final active in _activeNotes)
-        MidiNoteOff(channel: active.channel, note: active.note),
-    ];
-    reset();
+    final out = <MidiMessage>[];
+    for (final key in List.of(_activeNotes)) {
+      _release(_cell(key.channel, key.note), out);
+    }
     _send(out);
   }
 
@@ -156,6 +190,10 @@ final class MidiNoteMatrix {
   /// The number of velocity slots every cell starts with.
   final int initialSlots;
 
+  /// The number of Note Ons a cell counts at most; the slots of a cell
+  /// never grow beyond it.
+  final int maxSlots;
+
   // ...........................................................................
   /// The number of channels.
   static const int channels = 16;
@@ -178,13 +216,7 @@ final class MidiNoteMatrix {
   void _noteOn(MidiNoteOn message, List<MidiMessage> out) {
     final cell = _cell(message.channel, message.note);
     final count = _counts[cell];
-    var slots = _slots[cell];
-    if (count == slots.length) {
-      slots = Uint8List(slots.length * 2)..setAll(0, slots);
-      _slots[cell] = slots;
-    }
-    slots[count] = message.velocity;
-    _counts[cell] = count + 1;
+    _write(cell, count, message.velocity);
     if (count == 0) {
       _activeNotes.add(MidiKey(channel: message.channel, note: message.note));
       out.add(message);
@@ -192,6 +224,23 @@ final class MidiNoteMatrix {
       out.add(MidiNoteOff(channel: message.channel, note: message.note));
       out.add(message);
     }
+  }
+
+  /// Writes [velocity] into slot [count] of [cell] and counts it, growing
+  /// the cell up to [maxSlots]; a full cell keeps its count and takes the
+  /// velocity into the slot filled last.
+  void _write(int cell, int count, int velocity) {
+    var slots = _slots[cell];
+    if (count == maxSlots) {
+      slots[count - 1] = velocity;
+      return;
+    }
+    if (count == slots.length) {
+      slots = Uint8List(min(slots.length * 2, maxSlots))..setAll(0, slots);
+      _slots[cell] = slots;
+    }
+    slots[count] = velocity;
+    _counts[cell] = count + 1;
   }
 
   void _noteOff(
@@ -209,12 +258,40 @@ final class MidiNoteMatrix {
     _slots[cell][count - 1] = 0;
     _counts[cell] = count - 1;
     if (count == 1) {
-      _activeNotes.removeWhere(
-        (active) => active.channel == channel && active.note == note,
-      );
+      _removeActive(channel, note);
       out.add(message);
     }
   }
+
+  /// Releases every held note of [channel] into [out].
+  void _releaseChannel(int channel, List<MidiMessage> out) {
+    for (final key in List.of(_activeNotes)) {
+      if (key.channel == channel) _release(_cell(channel, key.note), out);
+    }
+  }
+
+  /// Frees [cell] and adds a Note Off to [out] when the cell holds a note.
+  void _release(int cell, List<MidiMessage> out) {
+    final count = _counts[cell];
+    if (count == 0) return;
+    _slots[cell].fillRange(0, count, 0);
+    _counts[cell] = 0;
+    final channel = cell ~/ notes;
+    final note = cell % notes;
+    _removeActive(channel, note);
+    out.add(MidiNoteOff(channel: channel, note: note));
+  }
+
+  void _removeActive(int channel, int note) => _activeNotes.removeWhere(
+    (active) => active.channel == channel && active.note == note,
+  );
+
+  /// Whether [change] is a channel mode message that ends the notes of
+  /// its channel: All Sound Off, All Notes Off, Omni Off, Omni On, Mono On
+  /// or Poly On (MIDI 1.0 Detailed Specification, channel mode messages).
+  static bool _endsNotes(MidiControlChange change) =>
+      change.controller == MidiControllers.allSoundOff ||
+      change.controller >= MidiControllers.allNotesOff;
 
   void _send(List<MidiMessage> out) {
     if (out.isEmpty) return;

@@ -28,6 +28,7 @@ void main() {
     group('constructor', () {
       test('starts empty with five slots per cell', () {
         expect(matrix.initialSlots, 5);
+        expect(matrix.maxSlots, 10);
         expect(matrix.activeNotes, isEmpty);
         expect(matrix.slots(channel: 9, note: 67), equals([0, 0, 0, 0, 0]));
         expect(matrix.velocities(channel: 9, note: 67), isEmpty);
@@ -39,13 +40,18 @@ void main() {
         }
       });
 
-      test('takes the number of initial slots', () {
-        final small = MidiNoteMatrix(initialSlots: 2);
+      test('takes the number of initial and maximal slots', () {
+        final small = MidiNoteMatrix(initialSlots: 2, maxSlots: 3);
         expect(small.initialSlots, 2);
+        expect(small.maxSlots, 3);
         expect(small.slots(channel: 0, note: 0), equals([0, 0]));
         expect(small.midiOut, isNull);
         expect(
           () => MidiNoteMatrix(initialSlots: 0),
+          throwsA(isA<AssertionError>()),
+        );
+        expect(
+          () => MidiNoteMatrix(initialSlots: 5, maxSlots: 4),
           throwsA(isA<AssertionError>()),
         );
       });
@@ -170,6 +176,192 @@ void main() {
             <MidiMessage>[on50],
           ]),
         );
+      });
+    });
+
+    // .........................................................................
+    group('channel mode messages', () {
+      const other = MidiNoteOn(channel: 9, note: 68, velocity: 70);
+      const foreign = MidiNoteOn(channel: 0, note: 67, velocity: 80);
+      MidiControlChange mode(int controller, {int channel = 9}) =>
+          MidiControlChange(channel: channel, controller: controller, value: 0);
+
+      test('release the held notes of the channel and pass through', () {
+        for (final controller in [120, 123, 124, 125, 126, 127]) {
+          matrix.reset();
+          sent.clear();
+          matrix.midiIn([on50, other, foreign, mode(controller)]);
+          expect(
+            sent.single,
+            equals([
+              on50,
+              other,
+              foreign,
+              off,
+              const MidiNoteOff(channel: 9, note: 68),
+              mode(controller),
+            ]),
+            reason: 'controller $controller',
+          );
+          expect(
+            matrix.activeNotes,
+            equals([const MidiKey(channel: 0, note: 67)]),
+          );
+          expect(matrix.slots(channel: 9, note: 67), equals(List.filled(5, 0)));
+        }
+      });
+
+      test('pass through without held notes', () {
+        matrix.midiIn([mode(123)]);
+        expect(
+          sent,
+          equals([
+            <MidiMessage>[mode(123)],
+          ]),
+        );
+      });
+
+      test('leave the notes alone for other controllers', () {
+        matrix.midiIn([on50, mode(121), mode(122), mode(64)]);
+        expect(sent.single, equals([on50, mode(121), mode(122), mode(64)]));
+        expect(matrix.isActive(channel: 9, note: 67), isTrue);
+      });
+    });
+
+    // .........................................................................
+    group('release(channel: channel, note: note)', () {
+      test('sends a Note Off for a held note and frees the cell', () {
+        matrix.midiIn([on50, on60]);
+        sent.clear();
+        matrix.release(channel: 9, note: 67);
+        expect(
+          sent,
+          equals([
+            <MidiMessage>[off],
+          ]),
+        );
+        expect(matrix.activeNotes, isEmpty);
+        expect(matrix.slots(channel: 9, note: 67), equals(List.filled(5, 0)));
+      });
+
+      test('sends nothing for a note that is not held', () {
+        matrix.release(channel: 9, note: 67);
+        expect(sent, isEmpty);
+      });
+
+      test('asserts the channel and note ranges', () {
+        for (final (channel, note) in [(-1, 0), (16, 0), (0, -1), (0, 128)]) {
+          expect(
+            () => matrix.release(channel: channel, note: note),
+            throwsA(isA<AssertionError>()),
+          );
+        }
+      });
+    });
+
+    // .........................................................................
+    group('releaseChannel(channel)', () {
+      test('sends a Note Off for every held note of the channel', () {
+        const other = MidiNoteOn(channel: 9, note: 68, velocity: 70);
+        const foreign = MidiNoteOn(channel: 0, note: 67, velocity: 80);
+        matrix.midiIn([on50, other, foreign]);
+        sent.clear();
+        matrix.releaseChannel(9);
+        expect(
+          sent,
+          equals([
+            <MidiMessage>[off, const MidiNoteOff(channel: 9, note: 68)],
+          ]),
+        );
+        expect(
+          matrix.activeNotes,
+          equals([const MidiKey(channel: 0, note: 67)]),
+        );
+        expect(matrix.velocities(channel: 0, note: 67), equals([80]));
+      });
+
+      test('sends nothing when the channel holds no note', () {
+        matrix.releaseChannel(9);
+        expect(sent, isEmpty);
+      });
+
+      test('asserts the channel range', () {
+        for (final channel in [-1, 16]) {
+          expect(
+            () => matrix.releaseChannel(channel),
+            throwsA(isA<AssertionError>()),
+          );
+        }
+      });
+    });
+
+    // .........................................................................
+    group('maxSlots', () {
+      List<MidiNoteOn> noteOns(int count) => [
+        for (var velocity = 1; velocity <= count; velocity++)
+          MidiNoteOn(channel: 9, note: 67, velocity: velocity),
+      ];
+
+      test('caps the Note Ons of a cell and keeps the newest velocity', () {
+        matrix.midiIn(noteOns(11));
+        expect(
+          matrix.slots(channel: 9, note: 67),
+          equals([1, 2, 3, 4, 5, 6, 7, 8, 9, 11]),
+        );
+        expect(matrix.count(channel: 9, note: 67), 10);
+        expect(matrix.activeNotes, equals([active]));
+        matrix.midiIn(noteOns(100));
+        expect(matrix.slots(channel: 9, note: 67), hasLength(10));
+        expect(matrix.count(channel: 9, note: 67), 10);
+      });
+
+      test('still sends every Note On by the retrigger rule', () {
+        final ons = noteOns(11);
+        matrix.midiIn(ons);
+        expect(
+          sent.single,
+          equals([
+            ons.first,
+            for (final on in ons.skip(1)) ...[off, on],
+          ]),
+        );
+        sent.clear();
+        matrix.setRetriggerRepeatedNoteOns(channel: 9, value: false);
+        matrix.midiIn(noteOns(3));
+        expect(sent, isEmpty);
+        expect(matrix.slots(channel: 9, note: 67).last, 3);
+      });
+
+      test('releases a capped cell after maxSlots Note Offs', () {
+        matrix.midiIn(noteOns(12));
+        sent.clear();
+        matrix.midiIn([for (var i = 0; i < 9; i++) off]);
+        expect(sent, isEmpty);
+        expect(matrix.count(channel: 9, note: 67), 1);
+        matrix.midiIn([off]);
+        expect(
+          sent,
+          equals([
+            <MidiMessage>[off],
+          ]),
+        );
+        expect(matrix.activeNotes, isEmpty);
+        matrix.midiIn([off]);
+        expect(sent, hasLength(2));
+      });
+
+      test('grows to maxSlots when doubling would exceed it', () {
+        final small = MidiNoteMatrix(initialSlots: 3, maxSlots: 4);
+        small.midiIn(noteOns(5));
+        expect(small.slots(channel: 9, note: 67), equals([1, 2, 3, 5]));
+        expect(small.count(channel: 9, note: 67), 4);
+      });
+
+      test('never grows when initialSlots equals maxSlots', () {
+        final fixed = MidiNoteMatrix(initialSlots: 2, maxSlots: 2);
+        fixed.midiIn(noteOns(3));
+        expect(fixed.slots(channel: 9, note: 67), equals([1, 3]));
+        expect(fixed.count(channel: 9, note: 67), 2);
       });
     });
 
