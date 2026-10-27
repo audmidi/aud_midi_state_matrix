@@ -1,0 +1,10 @@
+name: aud_midi_state_matrix
+description: "Matrices of the active MIDI notes and the current controller values per channel: velocity slots, midiOut callback, retrigger per channel"
+version: 0.0.1
+repository: https://github.com/audmidi/aud_midi_state_matrix.git
+
+environment:
+  sdk: ">=3.13.0 <4.0.0"
+dev_dependencies:
+  lints: ^6.1.0
+  test: ^1.33.0

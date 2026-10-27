@@ -1,0 +1,8 @@
+.dart_tool/
+build/
+coverage/
+node_modules/
+*.vm.json
+.DS_Store
+.gg/*
+!.gg/gg.json
