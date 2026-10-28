@@ -37,10 +37,10 @@ packages:
     dependency: "direct main"
     description:
       name: aud_midi_standard
-      sha256: dbf2b27336731c528d9d2f70deaf70d2463718914a5ede6d2aab85d24cddd7b0
+      sha256: "92559c6e1534b892f1029a3bb6c08a07f2e96cda1d0dcca227271d3e9353306c"
       url: "https://pub.dev"
     source: hosted
-    version: "0.2.0"
+    version: "0.3.0"
   boolean_selector:
     dependency: transitive
     description:
@@ -229,10 +229,10 @@ packages:
     dependency: transitive
     description:
       name: gg_capture_print
-      sha256: fd793824121435fe128619c99bcf4a6fac9398188dcc7dd3def6cfe02d2327f9
+      sha256: "3c35399877ccc15f8ea2e768064b1db847a4f71c303708ea1cd52d8934bc0417"
       url: "https://pub.dev"
     source: hosted
-    version: "1.2.0"
+    version: "1.2.1"
   gg_console_colors:
     dependency: transitive
     description:
