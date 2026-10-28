@@ -1,14 +1,25 @@
 # aud_midi_state_matrix
 
-Matrizen für den Zustand, den ein MIDI-Strom hinterlässt: welche Noten auf
-welchem Kanal klingen, mit der Velocity jedes NoteOns, das sie hält, und
-der aktuelle Wert jedes Controllers. Beide Matrizen reichen die
-verarbeiteten Nachrichten an einen `midiOut`-Callback weiter und stehen so
-in einer Kette vor einem Ausgang.
+[English](README.md) | Deutsch
+
+[![CI](https://github.com/audmidi/aud_midi_state_matrix/actions/workflows/quick_check.yaml/badge.svg)](https://github.com/audmidi/aud_midi_state_matrix/actions/workflows/quick_check.yaml)
+[![pub package](https://img.shields.io/pub/v/aud_midi_state_matrix.svg)](https://pub.dev/packages/aud_midi_state_matrix)
+
+Matrizen der aktiven MIDI-Noten und der aktuellen Controller-Werte pro
+Kanal: Velocity-Slots, midiOut-Callback, Retrigger pro Kanal. Beide
+Matrizen reichen die verarbeiteten Nachrichten an einen `midiOut`-Callback
+weiter und stehen so in einer Kette vor einem Ausgang.
 
 Teil der aud_midi-Familie, siehe [aud_midi](https://github.com/audmidi/aud_midi).
 
-## Ziele
+## Motivation
+
+Ein MIDI-Strom hinterlässt Zustand: welche Noten auf welchem Kanal
+klingen und der aktuelle Wert jedes Controllers. Ohne diesen Zustand
+beendet das erste NoteOff eine Note, die zwei Eingänge gemeinsam spielen,
+wiederholte NoteOns stapeln sich am Ausgang, und ein NoteOff, das nie
+ankommt, lässt eine Note endlos klingen. Dieses Paket hält diesen Zustand
+in zwei Matrizen:
 
 - Zählen, wie viele NoteOns eine Note halten, damit zusammengeführte
   Eingänge sie erst mit dem letzten NoteOff loslassen
@@ -18,7 +29,85 @@ Teil der aud_midi-Familie, siehe [aud_midi](https://github.com/audmidi/aud_midi)
 - Den letzten Wert jedes Controllers pro Kanal merken
 - Reines Dart ohne I/O; einzige Abhängigkeit ist `aud_midi_standard`
 
-## Stand
+## Installation
+
+```bash
+dart pub add aud_midi_state_matrix
+```
+
+## Verwendung
+
+Eine Kette aus Notenmatrix und Controllermatrix vor einem druckenden
+Ausgang, derselbe Code wie
+[example/aud_midi_state_matrix_example.dart](example/aud_midi_state_matrix_example.dart):
+
+```dart
+import 'package:aud_midi_standard/aud_midi_standard.dart';
+import 'package:aud_midi_state_matrix/aud_midi_state_matrix.dart';
+
+void main() {
+  // A chain: note matrix -> controller matrix -> output
+  final controllers = MidiControllerMatrix(
+    midiOut: (messages) => print('out: $messages'),
+  );
+  final notes = MidiNoteMatrix(midiOut: controllers.midiIn);
+
+  const on50 = MidiNoteOn(channel: 9, note: 67, velocity: 50);
+  const on60 = MidiNoteOn(channel: 9, note: 67, velocity: 60);
+  const off = MidiNoteOff(channel: 9, note: 67);
+
+  // Two Note Ons hold the note, only the last Note Off releases it.
+  notes.midiIn([on50]); // out: the Note On
+  notes.midiIn([on60]); // out: a Note Off, then the new Note On
+  print(notes.slots(channel: 9, note: 67)); // [50, 60, 0, 0, 0]
+  print(notes.activeNotes); // [MidiKey(channel: 9, note: 67)]
+  notes.midiIn([off]); // nothing, the note is still held
+  notes.midiIn([off]); // out: the Note Off
+
+  // Without retrigger a sounding note is left alone.
+  notes.setRetriggerRepeatedNoteOns(channel: 9, value: false);
+  notes.midiIn([on50, on60, off, off]); // out: the Note On, the Note Off
+
+  // Controller values are remembered on the way through.
+  notes.midiIn([
+    const MidiControlChange(channel: 9, controller: 1, value: 100),
+  ]);
+  print(controllers.value(channel: 9, controller: 1)); // 100
+  print(controllers.entries);
+}
+```
+
+Es gibt aus:
+
+```text
+out: [MidiNoteOn(channel: 9, note: 67, velocity: 50)]
+out: [MidiNoteOff(channel: 9, note: 67, velocity: 64), MidiNoteOn(channel: 9, note: 67, velocity: 60)]
+[50, 60, 0, 0, 0]
+[MidiKey(channel: 9, note: 67)]
+out: [MidiNoteOff(channel: 9, note: 67, velocity: 64)]
+out: [MidiNoteOn(channel: 9, note: 67, velocity: 50), MidiNoteOff(channel: 9, note: 67, velocity: 64)]
+out: [MidiControlChange(channel: 9, controller: 1, value: 100)]
+100
+[MidiControlChange(channel: 9, controller: 1, value: 100)]
+```
+
+## Grenzen
+
+- Noch nicht: Reset All Controllers (CC 121) in der Controller-Matrix,
+  14-Bit-Controller-Paare, RPN/NRPN, MIDI-2.0-Nachrichten
+- Eine Zelle zählt höchstens `maxSlots` NoteOns (Standard 10); ein
+  weiteres NoteOn ersetzt nur die Velocity des zuletzt belegten Slots
+- Kein I/O: die Matrizen stehen zwischen einem Port und einem Ausgang,
+  öffnen aber keinen
+
+## Dokumentation
+
+- [Plan des Tickets aud_midi_02](https://github.com/audmidi/aud_midi_pm/blob/main/doc/2026-Q4/tickets/2026-10-27-aud_midi_02-track-active-notes.md)
+- [Entscheidung state-001: Notenzellen sind Stapel von Velocity-Slots](https://github.com/audmidi/aud_midi_pm/blob/main/doc/2026-Q4/concepts/decisions/state-001.md)
+- [Guides](doc/guides/)
+- [Blog](doc/de/blog/)
+
+## Funktionsweise
 
 - `MidiNoteMatrix`: 16 Kanäle × 128 Noten, Velocity-Slots pro Zelle
   (anfangs 5, bei Bedarf verdoppelt, höchstens 10), `midiIn` und `midiOut`,
@@ -32,61 +121,6 @@ Teil der aud_midi-Familie, siehe [aud_midi](https://github.com/audmidi/aud_midi)
   `entries` als Liste von `MidiControlChange`, `reset`, `resetChannel`
 - `midiOut` ist ein `MidiMessageCallback`; `MidiKey`, `MidiControlChange`
   und der Callback-Typ kommen aus `aud_midi_standard`
-- Noch nicht: Reset All Controllers (CC 121) in der Controller-Matrix,
-  14-Bit-Controller-Paare, RPN/NRPN, MIDI-2.0-Nachrichten
-- 100 % Testabdeckung
-
-## Installation
-
-```bash
-dart pub add aud_midi_state_matrix
-```
-
-## Dokumentation
-
-- [Plan des Tickets aud_midi_02](https://github.com/audmidi/aud_midi_pm/blob/main/doc/2026-Q4/tickets/2026-10-27-aud_midi_02-track-active-notes.md)
-- [Entscheidung state-001: Notenzellen sind Stapel von Velocity-Slots](https://github.com/audmidi/aud_midi_pm/blob/main/doc/2026-Q4/concepts/decisions/state-001.md)
-- [Guides](doc/guides/)
-
-## Code-Beispiele
-
-```dart
-import 'package:aud_midi_standard/aud_midi_standard.dart';
-import 'package:aud_midi_state_matrix/aud_midi_state_matrix.dart';
-
-void main() {
-  // Eine Kette: Notenmatrix -> Controllermatrix -> Ausgang
-  final controllers = MidiControllerMatrix(
-    midiOut: (messages) => print('out: $messages'),
-  );
-  final notes = MidiNoteMatrix(midiOut: controllers.midiIn);
-
-  const on50 = MidiNoteOn(channel: 9, note: 67, velocity: 50);
-  const on60 = MidiNoteOn(channel: 9, note: 67, velocity: 60);
-  const off = MidiNoteOff(channel: 9, note: 67);
-
-  // Zwei NoteOns halten die Note, erst das letzte NoteOff lässt sie los.
-  notes.midiIn([on50]); // out: das NoteOn
-  notes.midiIn([on60]); // out: ein NoteOff, dann das neue NoteOn
-  print(notes.slots(channel: 9, note: 67)); // [50, 60, 0, 0, 0]
-  print(notes.activeNotes); // [MidiKey(channel: 9, note: 67)]
-  notes.midiIn([off]); // nichts, die Note wird noch gehalten
-  notes.midiIn([off]); // out: das NoteOff
-
-  // Ohne Retrigger bleibt ein klingender Ton in Ruhe.
-  notes.setRetriggerRepeatedNoteOns(channel: 9, value: false);
-  notes.midiIn([on50, on60, off, off]); // out: das NoteOn, das NoteOff
-
-  // Controller-Werte werden auf dem Weg gemerkt.
-  notes.midiIn([
-    const MidiControlChange(channel: 9, controller: 1, value: 100),
-  ]);
-  print(controllers.value(channel: 9, controller: 1)); // 100
-  print(controllers.entries);
-}
-```
-
-## Funktionsweise
 
 Jede Zelle der `MidiNoteMatrix` ist ein Stapel von Velocity-Slots. Ein
 NoteOn schreibt seine Velocity in den ersten freien Slot, ein NoteOff gibt
@@ -118,6 +152,15 @@ wenn ein Port verschwindet oder die App den Fokus verliert. Die
 `MidiControllerMatrix` merkt sich jeden Control Change und reicht alle
 Nachrichten weiter, so dass beide Matrizen verkettet werden können.
 
+## Status
+
+Vor 1.0 — die API kann sich zwischen Minor-Versionen ändern. 100 %
+Testabdeckung.
+
 ## Mitwirken
 
 Siehe [doc/guides/develop-guide.md](doc/guides/develop-guide.md).
+
+## Lizenz
+
+MIT — siehe [LICENSE](LICENSE).
