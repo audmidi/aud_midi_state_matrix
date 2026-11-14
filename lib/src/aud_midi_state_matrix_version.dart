@@ -9,4 +9,4 @@
 // coverage:ignore-file
 
 /// The version of the `aud_midi_state_matrix` package.
-const String audMidiStateMatrixVersion = '0.1.1';
+const String audMidiStateMatrixVersion = '1.0.0';

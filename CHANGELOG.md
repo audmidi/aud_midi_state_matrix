@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 - 2026-11-14
 
 ### Changed
 
@@ -16,7 +16,6 @@
 - Add the blog post of this change, in English and German
 
 - Bring the README to the README template, in English and German
-
 
 ## 0.1.0 - 2026-10-27
 
